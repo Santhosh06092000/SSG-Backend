@@ -1,7 +1,6 @@
 from fastapi import UploadFile
 import pandas as pd
 import io
-from typing import Union, Set, Tuple
 
 
 async def read_file(uploaded_file: UploadFile) -> pd.DataFrame:
