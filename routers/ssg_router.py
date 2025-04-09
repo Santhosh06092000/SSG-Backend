@@ -1,9 +1,11 @@
-from typing import Union
 from fastapi import APIRouter
-from fastapi import FastAPI, UploadFile, File
+from fastapi import UploadFile, File
 import pandas as pd
 import io
 from fastapi.responses import StreamingResponse
+
+from services.ssg_generator import SecretSantaGenerator
+from utils.file_handler import read_file
 
 router = APIRouter(prefix="/ssg", tags=["SSG"])
 
@@ -11,35 +13,34 @@ router = APIRouter(prefix="/ssg", tags=["SSG"])
 @router.post("/generate")
 async def generate_ssg(employee_details: UploadFile = File(...),
                        previous_year_ssa: UploadFile | None = File(None)):
+    try:
+        # read employee details file
+        df = await read_file(employee_details)
 
-    employee_details_contents = await employee_details.read()
-    df = pd.read_excel(io.BytesIO(employee_details_contents)) if employee_details.filename.endswith(
-        ".xlsx") else pd.read_csv(io.BytesIO(employee_details_contents))
-    # print("employee_details", df)
+        # Load previous year assignments if available
+        previous_assignments = set()
+        if previous_year_ssa:
+            # read previous year file
+            prev_df = await read_file(previous_year_ssa)
 
-    # copy the dataframe
-    secret_df = df.copy()
+            if {"Employee_EmailID", "Secret_Child_EmailID"}.issubset(prev_df.columns):
+                previous_assignments = set(
+                    zip(prev_df["Employee_EmailID"], prev_df["Secret_Child_EmailID"]))
 
-    while True:
-        # shuffle the dataframe
-        shuffled_df = df.sample(frac=1).reset_index(drop=True)
-        # print(shuffled_df.equals(secret_df))
-        print(any(df["Employee_EmailID"] == shuffled_df["Employee_EmailID"]))
-        if not any(df["Employee_EmailID"] == shuffled_df["Employee_EmailID"]):
-            break
+        # generate secret santa assignments
+        generator = SecretSantaGenerator(df, previous_assignments)
+        secret_df = generator.generate_secret_santa()
 
-    # update the secret child with shuffled data
-    secret_df["Secret_Child_Name"] = shuffled_df["Employee_Name"]
-    secret_df["Secret_Child_EmailID"] = shuffled_df["Employee_EmailID"]
+        # create xlsx file
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            secret_df.to_excel(writer, index=False, sheet_name="SSG")
+        buffer.seek(0)
 
-    # create xlsx file
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        secret_df.to_excel(writer, index=False, sheet_name="SSG")
-    buffer.seek(0)
-
-    return StreamingResponse(
-        buffer,
-        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        headers={"Content-Disposition": f"attachment; filename=SSG.xlsx"}
-    )
+        return StreamingResponse(
+            buffer,
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={"Content-Disposition": f"attachment; filename=SSG.xlsx"}
+        )
+    except Exception as e:
+        return {"error": str(e)}
