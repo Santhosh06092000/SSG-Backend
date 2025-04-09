@@ -37,10 +37,10 @@ async def generate_ssg(employee_details: UploadFile = File(...),
             secret_df.to_excel(writer, index=False, sheet_name="SSG")
         buffer.seek(0)
 
-        return StreamingResponse(
+        return {"status": True, "data": StreamingResponse(
             buffer,
             media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             headers={"Content-Disposition": f"attachment; filename=SSG.xlsx"}
-        )
+        )}
     except Exception as e:
-        return {"error": str(e)}
+        return {"status": False, "error": str(e)}
