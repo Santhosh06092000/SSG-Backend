@@ -5,6 +5,9 @@ import pandas as pd
 import io
 from fastapi.responses import StreamingResponse
 
+from services.ssg_generator import SecretSantaGenerator
+from utils.file_handler import read_file
+
 router = APIRouter(prefix="/ssg", tags=["SSG"])
 
 
@@ -12,25 +15,20 @@ router = APIRouter(prefix="/ssg", tags=["SSG"])
 async def generate_ssg(employee_details: UploadFile = File(...),
                        previous_year_ssa: UploadFile | None = File(None)):
 
-    employee_details_contents = await employee_details.read()
-    df = pd.read_excel(io.BytesIO(employee_details_contents)) if employee_details.filename.endswith(
-        ".xlsx") else pd.read_csv(io.BytesIO(employee_details_contents))
-    # print("employee_details", df)
+    df = await read_file(employee_details)
 
-    # copy the dataframe
-    secret_df = df.copy()
+    # Load previous year assignments if available
+    previous_assignments = set()
+    if previous_year_ssa:
+        prev_df = await read_file(previous_year_ssa)
 
-    while True:
-        # shuffle the dataframe
-        shuffled_df = df.sample(frac=1).reset_index(drop=True)
-        # print(shuffled_df.equals(secret_df))
-        print(any(df["Employee_EmailID"] == shuffled_df["Employee_EmailID"]))
-        if not any(df["Employee_EmailID"] == shuffled_df["Employee_EmailID"]):
-            break
+        if {"Employee_EmailID", "Secret_Child_EmailID"}.issubset(prev_df.columns):
+            previous_assignments = set(
+                zip(prev_df["Employee_EmailID"], prev_df["Secret_Child_EmailID"]))
 
-    # update the secret child with shuffled data
-    secret_df["Secret_Child_Name"] = shuffled_df["Employee_Name"]
-    secret_df["Secret_Child_EmailID"] = shuffled_df["Employee_EmailID"]
+    # generate secret santa assignments
+    generator = SecretSantaGenerator(df, previous_assignments)
+    secret_df = generator.generate_secret_santa()
 
     # create xlsx file
     buffer = io.BytesIO()
